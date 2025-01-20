@@ -1,20 +1,35 @@
-#[ -z "$1" ] && echo "Usage: $0 <aws-kms-key-id>" && exit 1
+[ -z "$1" ] && echo "Usage: $0 <aws-kms-key-id>" && exit 1
 
-# Generate an RSA private key
-openssl genrsa -f4 -out private.pem 2048
+PRIVATE_KEY_FILE=private.pem
+PUBLIC_KEY_FILE=public.pem
+
+DKIM_EXTENSION=ses.dkim
+PRIVATE_KEY_SES_DKIM_FILE="$PRIVATE_KEY_FILE.$DKIM_EXTENSION"
+PUBLIC_KEY_SES_DKIM_FILE="$PUBLIC_KEY_FILE.$DKIM_EXTENSION"
+
+PRIVATE_KEY_DER_FILE=private.der
+
+PRIVATE_KEY_PKCS8_FILE=private.pkcs8
+
+# Generate an private key
+#openssl genrsa -f4 -out private.pem 2048
+openssl ecparam -name secp521r1 -genkey -noout -out $PRIVATE_KEY_FILE
 
 # Generate the public key
-openssl rsa -in private.pem -pubout -out public.pem
+#openssl rsa -in private.pem -pubout -out public.pem
+openssl ec -in $PRIVATE_KEY_FILE -pubout -out $PUBLIC_KEY_FILE
 
 # Convert to the AWS SES DKIM versions
-grep -v '-----' private.pem | tr -d '\n' > private.ses.dkim
-grep -v '-----' public.pem | tr -d '\n' > public.ses.dkim
+# Use these when entering DKIM keys in the AWS SES console
+grep -v 'PRIVATE KEY' $PRIVATE_KEY_FILE | tr -d '\n' > $PRIVATE_KEY_SES_DKIM_FILE
+grep -v 'PUBLIC KEY' $PUBLIC_KEY_FILE | tr -d '\n' > $PUBLIC_KEY_SES_DKIM_FILE
 
 # Convert to the AWS KMS DER format
-openssl rsa -in private.pem -outform DER -out private.der
+#openssl rsa -in private.pem -outform DER -out private.der
+openssl ec -in $PRIVATE_KEY_FILE -outform DER -out $PRIVATE_KEY_DER_FILE
 
 # Convert to the PKCS8 format
-openssl pkcs8 -topk8 -inform DER -outform DER -in private.pem -out private.pkcs8 -nocrypt
+openssl pkcs8 -topk8 -inform DER -outform DER -in $PRIVATE_KEY_DER_FILE -out $PRIVATE_KEY_PKCS8_FILE -nocrypt
 
 # Wrap private.pkcs8 using RSA_AES_KEY_WRAP_SHA_256 wrapping algorithm
 # https://docs.aws.amazon.com/kms/latest/developerguide/importing-keys-encrypt-key-material.html
@@ -27,7 +42,7 @@ openssl rand -out aes-key.bin 32
 openssl enc -id-aes256-wrap-pad \
         -K "$(xxd -p < aes-key.bin | tr -d '\n')" \
         -iv A65959A6 \
-        -in private.pkcs8 \
+        -in $PRIVATE_KEY_PKCS8_FILE \
         -out key-material-wrapped.bin
 
 
