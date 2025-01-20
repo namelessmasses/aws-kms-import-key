@@ -1,4 +1,10 @@
-#[ -z "$1" ] && echo "Usage: $0 <aws-kms-key-id>" && exit 1
+[ -z "$1" ] && echo "Usage: $0 <aws-kms-key-id>" && exit 1
+AWS_KEY_ID=$1
+
+aws kms get-parameters-for-import \
+    --key-id ${AWS_KEY_ID} \
+    --wrapping-algorithm RSA_AES_KEY_WRAP_SHA_256 \
+    --wrapping-key-spec RSA_4096
 
 PRIVATE_KEY_FILE=private.pem
 PUBLIC_KEY_FILE=public.pem
@@ -45,7 +51,6 @@ openssl enc -id-aes256-wrap-pad \
         -in $PRIVATE_KEY_PKCS8_FILE \
         -out key-material-wrapped.bin
 
-
 # Encrypt the AES key using the KMS WrappingPublicKey
 # Encrypt your AES symmetric encryption key with the downloaded public key
 openssl pkeyutl \
@@ -63,4 +68,4 @@ openssl pkeyutl \
 cat aes-key-wrapped.bin key-material-wrapped.bin > EncryptedKeyMaterial.bin
 
 # Import the key material
-#aws kms import-key-material --key-id $1 --encrypted-key-material fileb://EncryptedKeyMaterial.bin --import-token fileb://ImportToken.bin 
+echo "aws kms import-key-material --key-id $AWS_KEY_ID --encrypted-key-material fileb://EncryptedKeyMaterial.bin --import-token fileb://ImportToken.bin --expiration-model KEY_MATERIAL_DOES_NOT_EXPIRE $OPT_AWS_REGION"
