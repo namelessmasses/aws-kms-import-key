@@ -1,20 +1,14 @@
 import boto3
-import subprocess
 import argparse
+from cryptography.hazmat.primitives import serialization, keywrap, hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+import os
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Generate and import key material into AWS KMS.')
     parser.add_argument('--key-id', nargs='?', type=str, required=True, help='The AWS KMS key ID')
     parser.add_argument('--region', nargs='?', type=str, default='us-west-2', help='The AWS region (default: us-west-2)')
     return parser.parse_args()
-
-def run_command(command):
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"Error running command: {command}")
-        print(result.stderr)
-        exit(1)
-    return result.stdout
 
 def main(args):
     kms_client = boto3.client('kms', region_name=args.region)
@@ -26,58 +20,65 @@ def main(args):
         WrappingKeySpec='RSA_4096'
     )
 
-    wrapping_key = response['PublicKey']
+    aws_public_key = response['PublicKey']
+    aws_public_key = serialization.load_der_public_key(aws_public_key)
+
     import_token = response['ImportToken']
 
-    private_key_file = 'private.pem'
-    public_key_file = 'public.pem'
-
-    dkim_extension = 'ses.dkim'
-    private_key_ses_dkim_file = f"{private_key_file}.{dkim_extension}"
-    public_key_ses_dkim_file = f"{public_key_file}.{dkim_extension}"
-
-    private_key_der_file = 'private.der'
-    private_key_pkcs8_file = 'private.pkcs8'
-
     # Generate a private key
-    run_command(f"openssl genrsa -f4 -out {private_key_file} 2048")
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048)
+    
+    key_to_wrap = private_key.private_bytes(
+        encoding=serialization.Encoding.DER, 
+        format=serialization.PrivateFormat.PKCS8, 
+        encryption_algorithm=serialization.NoEncryption())
 
-    # Generate the public key
-    run_command(f"openssl rsa -in {private_key_file} -pubout -out {public_key_file}")
-
-    # Convert to the AWS SES DKIM versions
-    run_command(f"grep -v 'PRIVATE KEY' {private_key_file} | tr -d '\\n' > {private_key_ses_dkim_file}")
-    run_command(f"grep -v 'PUBLIC KEY' {public_key_file} | tr -d '\\n' > {public_key_ses_dkim_file}")
-
-    # Convert to the AWS KMS DER format
-    run_command(f"openssl rsa -in {private_key_file} -outform DER -out {private_key_der_file}")
-
-    # Convert to the PKCS8 format
-    run_command(f"openssl pkcs8 -topk8 -inform DER -outform DER -in {private_key_der_file} -out {private_key_pkcs8_file} -nocrypt")
-
-    # Generate a 32-byte AES symmetric encryption key
-    run_command("openssl rand -out aes-key.bin 32")
-
-    # Encrypt the private key using the AES key
-    run_command(f"openssl enc -id-aes256-wrap-pad -K \"$(xxd -p < aes-key.bin | tr -d '\\n')\" -iv A65959A6 -in {private_key_pkcs8_file} -out key-material-wrapped.bin")
-
-    # Save the wrapping key to a file
-    with open('WrappingPublicKey.bin', 'wb') as f:
-        f.write(wrapping_key)
-
-    # Encrypt the AES key using the KMS WrappingPublicKey
-    run_command("openssl pkeyutl -encrypt -in aes-key.bin -out aes-key-wrapped.bin -inkey WrappingPublicKey.bin -keyform DER -pubin -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256")
-
-    # Combine the encrypted AES key and the encrypted private key
-    run_command("cat aes-key-wrapped.bin key-material-wrapped.bin > EncryptedKeyMaterial.bin")
+    aes_key = os.urandom(32)
+    
+    # Wrap the private key with the AES key using AES key wrap with padding
+    key_material_wrapped = keywrap.aes_key_wrap_with_padding(wrapping_key=aes_key, key_to_wrap=key_to_wrap)
+    
+    # Encrypt the AES key with the AWS public key
+    aes_key_wrapped = aws_public_key.encrypt(
+        aes_key,
+        padding=padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    
+    # Concatenate the wrapped AES key and the wrapped key material
+    encrypted_key_material = aes_key_wrapped + key_material_wrapped
 
     # Import the key material
     kms_client.import_key_material(
-        KeyId=aws_key_id,
-        EncryptedKeyMaterial=open('EncryptedKeyMaterial.bin', 'rb').read(),
+        KeyId=args.key_id,
+        EncryptedKeyMaterial=encrypted_key_material,
         ImportToken=import_token,
         ExpirationModel='KEY_MATERIAL_DOES_NOT_EXPIRE'
     )
+    
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+    
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    # Output the private key
+    with open(f'{args.key_id}.private.pem', 'wb') as f:
+        f.write(private_pem)
+
+    # Output the public key        
+    with open(f'{args.key_id}.public.pem', 'wb') as f:
+        f.write(public_pem)
 
 if __name__ == "__main__":
     args = parse_arguments()
