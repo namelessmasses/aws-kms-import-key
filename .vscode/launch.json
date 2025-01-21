@@ -4,16 +4,25 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
-            "name": "Python Debugger: Current File with Arguments",
+            "name": "Debug get_ses_dkim_keys",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "get_ses_dkim_keys.py",
+            "console": "integratedTerminal",
+            "args": [
+                "c7e3a754-3949-4987-ac48-1cd8a55a6da4"
+            ]
+        },
+        {
+            "name": "Debug generate_and_import_key",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "generate_and_import_key.py",
             "console": "integratedTerminal",
             "args": [
                 "--key-id",
-                "0e55af59-9df5-474d-8a66-da1380825662",
+                "c7e3a754-3949-4987-ac48-1cd8a55a6da4",
                 "--region",
                 "us-east-1"
             ]
