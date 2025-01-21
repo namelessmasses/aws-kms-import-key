@@ -1,6 +1,12 @@
 import boto3
 import subprocess
-import os
+import argparse
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Generate and import key material into AWS KMS.')
+    parser.add_argument('--key-id', nargs='?', type=str, required=True, help='The AWS KMS key ID')
+    parser.add_argument('--region', nargs='?', type=str, default='us-west-2', help='The AWS region (default: us-west-2)')
+    return parser.parse_args()
 
 def run_command(command):
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
@@ -10,12 +16,12 @@ def run_command(command):
         exit(1)
     return result.stdout
 
-def main(aws_key_id):
-    kms_client = boto3.client('kms')
+def main(args):
+    kms_client = boto3.client('kms', region_name=args.region)
 
     # Get parameters for import
     response = kms_client.get_parameters_for_import(
-        KeyId=aws_key_id,
+        KeyId=args.key_id,
         WrappingAlgorithm='RSA_AES_KEY_WRAP_SHA_256',
         WrappingKeySpec='RSA_4096'
     )
@@ -74,8 +80,5 @@ def main(aws_key_id):
     )
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python generate_and_import.py <aws-kms-key-id>")
-        sys.exit(1)
-    main(sys.argv[1])
+    args = parse_arguments()
+    main(args)
