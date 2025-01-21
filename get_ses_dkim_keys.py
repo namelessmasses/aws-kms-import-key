@@ -17,7 +17,7 @@ print(key_flat)
 print()
 
 # split private_key into chunks of n characters
-n = 256
+n = 128
 key_chunks = [key_flat[i:i+n] for i in range(0, len(key_flat), n)]
 
 # print the chunks as double quoted strings separated by spaces
